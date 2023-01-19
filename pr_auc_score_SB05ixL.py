@@ -1,5 +1,4 @@
 import numpy as np
-import sklearn
 
 from sklearn.metrics import average_precision_score
 
