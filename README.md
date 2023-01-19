@@ -1,8 +1,25 @@
-# Comment démasquer les fraudeurs ? par BNP Paribas PF 
+<div style="display: flex; background-color: RGB(255,114,0);" >
+<div>
+<img src="fraudeur_-_BNPP_PF_-_finale.jpg" width="300"/>
+</div>
+
+# PROJET - Comment démasquer les fraudeurs ? 
+</div>
+
+par BNP Paribas PF
 
 Lien vers le challenge : https://challengedata.ens.fr/participants/challenges/104/
 
-## Contexte
+
+<div style="display: flex; background-color: Blue; padding: 15px;" >
+
+## 1.Mission
+</div>
+
+<div style="display: flex; background-color: Green; padding: 7px;" >
+
+### 1.1. Contexte
+</div>
 
 BNP Paribas Personal Finance est le n°1 du financement aux particuliers en France et en Europe au travers de ses activités de crédit à la consommation.
 
@@ -16,15 +33,20 @@ La fraude est un problème majeur de plus en plus préoccupant pour les institut
 
 Le développement de méthodes de détection de la fraude est stratégique et essentiel pour nous. Les fraudeurs s'avèrent toujours très créatifs et ingénieux pour normaliser leurs comportements et les rendre difficilement identifiables. Une contrainte s'ajoute à cette problématique, la faible occurence de la fraude dans notre population.
 
-## But
+
+<div style="display: flex; background-color: Green; padding: 7px;" >
+
+### 1.2. But 
+</div>
 
 L'objectif de ce challenge est de trouver la meilleure méthode pour transformer et agréger les données relatives au panier client d'un de nos parteneraires pour détecter les cas de fraude.
 
 En utilisant ces données panier, les fraudeurs pourront être détectés, et ainsi refusés dans le futur.
 
-## Description des données
+<div style="display: flex; background-color: Green; padding: 7px;" >
 
-### 1. Base de données
+### 1.3. Description des données
+</div>
 
 La base contient une liste d'achats effectués chez notre partenaire que nous avons financés. Les informations décrivent exclusivement le contenu du panier.
 
@@ -45,7 +67,11 @@ La variable Nb_of_items correspond au nombre d'items dans le panier, tandis que 
 
 L’indicatrice fraud_flag permet de savoir si l’observation a été identifiée comme frauduleuse ou non.
 
-#### 1.1. Description des variables en entrée (X)
+<div style="display: flex; background-color: indigo;" >
+
+##### 1.3.1. Description des variables en entrée (X)
+</div>
+
 |Variable 	|Description 	|Exemple    |
 |-----------|---------------|----------------------------------------------------------------------|
 |ID (Num) 	|Identifiant unique| 	1|
@@ -57,22 +83,63 @@ L’indicatrice fraud_flag permet de savoir si l’observation a été identifi�
 |Nbr_of_prod_purchas1 à Nbr_of_prod_purchas24 (Num)|Nombre de produits dans l'item 1 à 24|2|
 |Nb_of_items (Num) |Nombre total d'items|7|
 
-#### 1.2. Description de la variable de sortie (Y)
+<div style="display: flex; background-color: indigo;" >
+
+##### 1.3.2. Description de la variable de sortie (Y)
+</div>
+
 |Variable|Description|
 |-----------|---------------|
 |ID (Num) |	Identifiant unique|
 |fraud_flag (Num) |	Fraude = 1, Non Fraude = 0|
 
+<div style="display: flex; background-color: indigo;" >
 
-#### 1.3. Taille de la base
+##### 1.3.3. Taille de la base
+</div>
 
 Taille : 115 988 observations, 147 colonnes.
 
 Distribution de Y :
 
-    Fraude (Y=1) : 1 681 observations
-
-    Non Fraude (Y=0) : 114 307 observations
+- Fraude (Y=1) : 1 681 observations
+- Non Fraude (Y=0) : 114 307 observations
 
 Le taux de fraude sur l'ensemble de la base est autour de 1.4%.
-		
+
+<div style="display: flex; background-color: Green; padding: 7px;" >
+
+### 1.4. Echantillons 
+</div>
+
+La méthode d'échantillonnage appliquée est un tirage aléatoire simple sans remise. Ainsi, 80% de la base initiale a été utilisée pour générer l'échantillon de training et 20% pour l'échantillon de test.
+
+<div style="display: flex; background-color: indigo;" >
+
+#### 1.4.1. Echantillon d'entraînement
+</div>
+
+Taille : 92 790 observations, 147 colonnes.
+
+Distribution de Y_train :
+
+- Fraude (Y=1) : 1 319 observations
+- Non Fraude (Y=0) : 91 471 observations
+
+<div style="display: flex; background-color: indigo;" >
+
+#### 1.4.2. Echantillon de test
+</div>
+Taille : 23 198 observations, 147 colonnes.
+
+Distribution de Y_test :
+
+- Fraude (Y=1) : 362 observations
+- Non Fraude (Y=0) : 22 836 observations
+
+<div style="display: flex; background-color: Green; padding: 7px;" >
+
+### 1.5. Description du benchmark
+</div>
+
+Cf. https://challengedata.ens.fr/participants/challenges/104/
