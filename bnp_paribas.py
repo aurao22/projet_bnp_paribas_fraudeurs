@@ -49,6 +49,119 @@ def initITEM_CATEGORIES():
             ITEM_CATEGORIES[val] = key
             ITEM_CATEGORIES[clean_categories(val)] = key
     return ITEM_CATEGORIES
+# ----------------------------------------------------------------------------------
+#                        PRE-PROCESSING
+# ----------------------------------------------------------------------------------
+def pre_processing(X, y=None,save_file_path = None, verbose=0):
+    short_name = "pre_processing"
+    dataset_train = None
+
+    # 1. Fusion des DF X et Y
+    if y is not None:
+        dataset_train = pd.merge(left=X, right=y, on='ID', indicator=True)
+        if verbose>0:
+            print(f'[{short_name}]\tINFO : \n{dataset_train["_merge"].value_counts()}')
+        
+        dataset_train = dataset_train.drop(columns=["_merge"])
+        # On déplace les colonnes intéressantes au début de la DF
+        cols = list(dataset_train.columns)
+        for c_n in ['fraud_flag', 'Nb_of_items']:
+            try:
+                cols.remove(c_n)
+                cols.insert(1, c_n)
+            except :
+                pass
+
+        dataset_train = dataset_train[cols]
+        # print(dataset_train.columns)
+    else:
+        dataset_train = X.copy()
+        
+    # 2. Uniformisation des écritures des items
+    # Certains items sont identiques mais écris différemment, une étape d'uniformisation est nécessaire...
+    for i in range(1, 25):
+        # à l'origine il y avait 173 items, après nettoyage => 162 items
+        col = f'item{i}'
+        dataset_train[col] = dataset_train[col].apply(lambda x: clean_categories(input_str=x))
+        # à l'origine il y avait 829 maker, après nettoyage => 827 makers
+        col = f'make{i}'
+        dataset_train[col] = dataset_train[col].apply(lambda x: clean_categories(input_str=x))
+        col = f'model{i}'
+        dataset_train[col] = dataset_train[col].apply(lambda x: clean_categories(input_str=x))
+
+
+    # 3. Suppression des colonnes de code
+    if verbose>0:
+        print(f'[{short_name}]\tINFO : input {dataset_train.shape}')
+
+    dataset_train = _drop_numeroted_data_col(df=dataset_train, cols_name=["goods_code"], verbose=verbose)
+    if verbose>0:
+        print(f'[{short_name}]\tINFO : output {dataset_train.shape}')
+
+    if save_file_path is not None:
+        # Sauvegarde du fichier
+        dataset_train.to_csv(save_file_path)
+        if verbose > 0: print(f"[{short_name}]\tINFO: {save_file_path} => SAVED")
+
+    return dataset_train
+
+def encode_data(data_set_path,df, file_name= "encoded_data.csv", force_reloading=0, with_drop=1,verbose=0):
+    short_name = "encode_data"
+    df_res = None
+    save_file_path = join(data_set_path, file_name)
+
+    if exists(save_file_path) and getsize(save_file_path) > 0 and not force_reloading:
+        if verbose > 0: print(f"[{short_name}]\tINFO: {file_name} => Exist")
+        # Chargement de la DF fichier
+        df_res = pd.read_csv(save_file_path, sep=",", index_col="index",low_memory=False)
+        
+    if df_res is None:
+        if verbose>0:
+            print(f"[{short_name}]\tINFO : STEP 1 => encoding item to features about 30 min ... START")
+        # /!\ 42 min de traitement lors du forçage
+        df_res = _encode_item_to_features(df=df, with_drop=with_drop,verbose=verbose)
+        
+        if verbose>0:
+            print(f"[{short_name}]\tINFO : STEP 2 => encoding mark to features about 30 min... START")
+        df_res = _encode_make_to_features(df=df, with_drop=with_drop, verbose=verbose)
+
+        # Sauvegarde du fichier
+        if verbose>0: print(f"[{short_name}]\tINFO : STEP 3 => Saving File ...")
+        df_res.to_csv(save_file_path)
+        if verbose > 0: print(f"[{short_name}]\tINFO: {file_name} => SAVED")
+
+    return df_res
+
+def _encode_item_to_features(df, with_drop=0,verbose=0):
+    items_list = get_item_list(df=df, verbose=verbose-1)
+    return _encode_numeroted_data_to_features(df=df, data_list=items_list, data_col_name='item', with_drop=with_drop, verbose=verbose)
+
+def _encode_make_to_features(df, with_drop=0, verbose=0):
+    make_list = get_maker_list(df=df, verbose=verbose-1)
+    return _encode_numeroted_data_to_features(df=df, data_list=make_list, data_col_name='make', with_drop=with_drop, verbose=verbose)
+
+def _encode_numeroted_data_to_features(df, data_list, data_col_name='item', with_drop=0, verbose=0):
+    short_name = "encode_numeroted_data_to_features"
+    df_res = None
+            
+    if df_res is None:
+        if verbose > 0: print(f"[{short_name}]\tINFO: process start for more long process (more 50 min) .....")
+        df_res = df.copy()
+        
+        if verbose > 0: print(f"[{short_name}]\tINFO: Conversion {data_col_name.upper()} to feature... START")
+        for current_name in data_list:
+            df_res[current_name+"_nb"] = df_res.apply(lambda x : nb_by_col(current_name=current_name, data_col_name=data_col_name, row=x, col_addition='Nbr_of_prod_purchas', verbose=verbose), axis=1)
+            df_res[current_name+"_cash"] = df_res.apply(lambda x : nb_by_col(current_name=current_name, data_col_name=data_col_name, row=x, col_addition='cash_price', verbose=verbose), axis=1)
+        
+        if verbose > 0: print(f"[{short_name}]\tINFO: Conversion {data_col_name.upper()} to feature............ END")
+        
+        if with_drop:
+            if verbose>0:
+                print(f"[{short_name}]\tINFO : Drop columns ... ")
+            df_res = drop_items_colums(df=df_res, verbose=verbose)
+       
+    return df_res
+
 
 # ----------------------------------------------------------------------------------
 #                        DATA FUNCTIONS
@@ -108,40 +221,6 @@ def transpose_categories(df, verbose=0):
     return the_most_steel
 
 
-def nb_by_item(item_name, row, col_addition='Nbr_of_prod_purchas', verbose=0):
-    nb_item = 0
-    for i in range(1, 25):
-        item_val = row[f'item{i}']
-        if isinstance(item_val, str) and item_name == item_val:
-            nb_item += row[f'{col_addition}{i}']
-    return nb_item
-
-def get_data_train_categorie(data_set_path, dataset_train, items_list, force_reloading=0, file_name= "train_complete_with_categories.csv", verbose=0):
-    short_name = "get_data_train_categorie"
-    dataset_train_categorie_item = None
-    save_file_path = join(data_set_path, file_name)
-
-    if exists(save_file_path) and getsize(save_file_path) > 0 and not force_reloading:
-        if verbose > 0: print(f"[{short_name}]\tINFO: {file_name} => Exist")
-        # Chargement de la DF fichier
-        dataset_train_categorie_item = pd.read_csv(save_file_path, sep=",", index_col="index",low_memory=False)
-        
-    if dataset_train_categorie_item is None:
-        if verbose > 0: print(f"[{short_name}]\tINFO: process start for 42 min .....")
-        # 42 min de traitement
-        dataset_train_categorie_item = dataset_train.copy()
-        if items_list is None:
-            items_list = get_item_list(df=dataset_train, verbose=verbose)
-            if verbose>0:
-                print(items_list)
-
-        for item_name in items_list:
-            dataset_train_categorie_item[item_name+"_nb"] = dataset_train_categorie_item.apply(lambda x : nb_by_item(item_name, row=x, col_addition='Nbr_of_prod_purchas', verbose=verbose), axis=1)
-            dataset_train_categorie_item[item_name+"_cash"] = dataset_train_categorie_item.apply(lambda x : nb_by_item(item_name, row=x, col_addition='cash_price', verbose=verbose), axis=1)
-
-        dataset_train_categorie_item.to_csv(save_file_path)
-    return dataset_train_categorie_item
-
 def col_names_without_numeroted_card_col(df, verbose=0):
     col_extract = []
     # On enlève toutes les colonnes liées à la place dans le panier, ce n'est pas ce qui nous intéresse
@@ -185,26 +264,73 @@ def extract_most_steel(df, cat_warn, col_extract=None, verbose=0):
         print(most_reduce.shape)
     return most_reduce
 
+def nb_by_col(current_name, data_col_name, row, col_addition='Nbr_of_prod_purchas', verbose=0):
+    nb_item = 0
+    for i in range(1, 25):
+        item_val = row[f'{data_col_name}{i}']
+        if isinstance(item_val, str) and current_name == item_val:
+            nb_item += row[f'{col_addition}{i}']
+    return nb_item
 
 def get_item_list(df, verbose=0):
+    """Récupération de la liste des items pour en créer une catégorie
+
+    Args:
+        df (_type_): _description_
+        verbose (int, optional): _description_. Defaults to 0.
+
+    Returns:
+        _type_: _description_
+    """
     return _get_data_list(df=df, col_name="item", verbose=verbose)
 
 def get_maker_list(df, verbose=0):
     return _get_data_list(df=df, col_name="make", verbose=verbose)
 
 def _get_data_list(df, col_name, verbose=0):
+    short_name = f'get_{col_name}_list'
     items_list = set()
     for i in range(1, 25):
         items_list = items_list | set(df[f'{col_name}{i}'].unique())
     
-    if verbose>0:
-        print(len(items_list))
+    if verbose>1:
+        print(f'[{short_name}]\tDEBUG : ',len(items_list), "with NA value")
     
     items_list.remove(np.nan)
 
     if verbose>0:
-        print(len(items_list))
+        print(f'[{short_name}]\tINFO : ',len(items_list), col_name, "without NA value")
+        if verbose>1:
+            print(f'[{short_name}]\tDEBUG : ',items_list)
     return items_list
+
+def drop_items_colums(df, verbose=0):
+    return _drop_numeroted_data_col(df=df, cols_name=["item"], verbose=verbose)
+
+def drop_makers_colums(df, verbose=0):
+    return _drop_numeroted_data_col(df=df, cols_name=["make"], verbose=verbose)
+
+def _drop_numeroted_data_col(df, cols_name, verbose=0):
+    short_name = "drop_numeroted_data_col"
+    n_df = df.copy()
+    nb_col_droped = 0 
+    if verbose>1:
+        print(f"[{short_name}]\tDEBUG : input shape {n_df.shape}")   
+    for i in range(1, 25):
+        for col_name in cols_name:
+            try:
+                n_df = n_df.drop(columns=[f'{col_name}{i}'])
+                nb_col_droped += 1
+            except:
+                pass
+    
+    if verbose>0:
+        print(f"[{short_name}]\tINFO : {nb_col_droped} columns droped")
+        if verbose>1:
+            print(f"[{short_name}]\tDEBUG : output shape {n_df.shape}")   
+    return n_df
+
+
 
 # ----------------------------------------------------------------------------------
 #                        GRAPHIQUES
