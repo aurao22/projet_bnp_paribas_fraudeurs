@@ -143,3 +143,30 @@ Distribution de Y_test :
 </div>
 
 Cf. https://challengedata.ens.fr/participants/challenges/104/
+
+
+<div style="display: flex; background-color: Blue; padding: 15px;" >
+
+## 2.Démarche
+</div>
+
+<div style="display: flex; background-color: Green; padding: 7px;" >
+
+### 2.1. Exploration des données (EDA) / Pré-processing
+</div>
+
+L'exploration des données et le pré-processing sont présentés ici : [bnp_paribas.ipynb](bnp_paribas.ipynb)
+
+<div style="display: flex; background-color: Green; padding: 7px;" >
+
+### 2.2. Benchmark 1
+</div>
+
+Le fichier présentant le 1er Benchmark :  [bnp_paribas_benchmarks_1_aleatoire.ipynb](bnp_paribas_benchmarks_1_aleatoire.ipynb)
+
+<div style="display: flex; background-color: Green; padding: 7px;" >
+
+### 2.3. Présentation des données
+</div>
+
+L'une de nos missions était de présenter les données sous Flask
