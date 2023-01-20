@@ -7,6 +7,7 @@ from os import listdir
 from os.path import isfile, join, exists, getsize
 from copy import deepcopy
 from collections import defaultdict
+from tqdm import tqdm
 
 CARD_COLS_START = ['item', 'model', 'goods_code', 'cash_price', 'make','Nbr_of_prod_purchas']
 
@@ -79,7 +80,7 @@ def pre_processing(X, y=None,save_file_path = None, verbose=0):
         
     # 2. Uniformisation des écritures des items
     # Certains items sont identiques mais écris différemment, une étape d'uniformisation est nécessaire...
-    for i in range(1, 25):
+    for i in tqdm(range(1, 25), desc="clean", disable=verbose<1):
         # à l'origine il y avait 173 items, après nettoyage => 162 items
         col = f'item{i}'
         dataset_train[col] = dataset_train[col].apply(lambda x: clean_categories(input_str=x))
@@ -94,7 +95,7 @@ def pre_processing(X, y=None,save_file_path = None, verbose=0):
     if verbose>0:
         print(f'[{short_name}]\tINFO : input {dataset_train.shape}')
 
-    dataset_train = _drop_numeroted_data_col(df=dataset_train, cols_name=["goods_code"], verbose=verbose)
+    dataset_train = drop_numeroted_data_col(df=dataset_train, cols_name=["goods_code"], verbose=verbose)
     if verbose>0:
         print(f'[{short_name}]\tINFO : output {dataset_train.shape}')
 
@@ -117,17 +118,22 @@ def encode_data(data_set_path,df, file_name= "encoded_data.csv", force_reloading
         
     if df_res is None:
         if verbose>0:
-            print(f"[{short_name}]\tINFO : STEP 1 => encoding item to features about 30 min ... START")
+            print(f"[{short_name}]\tINFO : STEP 1 => encoding ITEM to features about 30 min ... START")
         # /!\ 42 min de traitement lors du forçage
         df_res = _encode_item_to_features(df=df, with_drop=with_drop,verbose=verbose)
-        
+        df_res.to_csv(save_file_path.replace("complete", 'ITEMS'))
+        df_temp = drop_numeroted_data_col(df=df_res, cols_name=["cash_price", "make", "model", "Nbr_of_prod_purchas"], verbose=verbose)
+        df_temp.to_csv(save_file_path.replace("complete", 'ITEMS_light'))
+
         if verbose>0:
-            print(f"[{short_name}]\tINFO : STEP 2 => encoding mark to features about 30 min... START")
-        df_res = _encode_make_to_features(df=df, with_drop=with_drop, verbose=verbose)
+            print(f"[{short_name}]\tINFO : STEP 2 => encoding MARK to features about 270 min soit 4h30 ... START")
+        df_res = _encode_make_to_features(df=df_res, with_drop=with_drop, verbose=verbose)
 
         # Sauvegarde du fichier
         if verbose>0: print(f"[{short_name}]\tINFO : STEP 3 => Saving File ...")
         df_res.to_csv(save_file_path)
+        df_temp = drop_numeroted_data_col(df=df_res, cols_name=["cash_price", "make", "model", "Nbr_of_prod_purchas"], verbose=verbose)
+        df_temp.to_csv(save_file_path.replace("complete", 'complete_light'))
         if verbose > 0: print(f"[{short_name}]\tINFO: {file_name} => SAVED")
 
     return df_res
@@ -142,25 +148,32 @@ def _encode_make_to_features(df, with_drop=0, verbose=0):
 
 def _encode_numeroted_data_to_features(df, data_list, data_col_name='item', with_drop=0, verbose=0):
     short_name = "encode_numeroted_data_to_features"
-    df_res = None
-            
-    if df_res is None:
-        if verbose > 0: print(f"[{short_name}]\tINFO: process start for more long process (more 50 min) .....")
-        df_res = df.copy()
+    if verbose > 0: print(f"[{short_name}]\tINFO: Conversion {data_col_name.upper()} to feature... START")
         
-        if verbose > 0: print(f"[{short_name}]\tINFO: Conversion {data_col_name.upper()} to feature... START")
-        for current_name in data_list:
-            df_res[current_name+"_nb"] = df_res.apply(lambda x : nb_by_col(current_name=current_name, data_col_name=data_col_name, row=x, col_addition='Nbr_of_prod_purchas', verbose=verbose), axis=1)
-            df_res[current_name+"_cash"] = df_res.apply(lambda x : nb_by_col(current_name=current_name, data_col_name=data_col_name, row=x, col_addition='cash_price', verbose=verbose), axis=1)
-        
-        if verbose > 0: print(f"[{short_name}]\tINFO: Conversion {data_col_name.upper()} to feature............ END")
-        
-        if with_drop:
-            if verbose>0:
-                print(f"[{short_name}]\tINFO : Drop columns ... ")
-            df_res = drop_items_colums(df=df_res, verbose=verbose)
+    df_res = df.copy()
+    
+    for current_name in tqdm(data_list, desc=f"{data_col_name}_list", disable=verbose<1):
+        df_res[data_col_name+"_"+current_name+"_nb"] = df_res.apply(lambda x : nb_by_col(current_name=current_name, data_col_name=data_col_name, row=x, col_addition='Nbr_of_prod_purchas', verbose=verbose-1), axis=1)
+        df_res[data_col_name+"_"+current_name+"_cash"] = df_res.apply(lambda x : nb_by_col(current_name=current_name, data_col_name=data_col_name, row=x, col_addition='cash_price', verbose=verbose-1), axis=1)
+    
+    if verbose > 0: print(f"[{short_name}]\tINFO: Conversion {data_col_name.upper()} to feature............ END")
+    
+    if with_drop:
+        if verbose>0:
+            print(f"[{short_name}]\tINFO : Drop {data_col_name} columns ... ")
+        df_res = drop_numeroted_data_col(df=df_res, cols_name=[data_col_name], verbose=verbose)
        
     return df_res
+
+def prefixed_cols(df, col_prefix, verbose=0):
+    short_name = "prefixed_cols"
+    cols = []
+    for col in df.columns:
+        if col.startswith(col_prefix):
+            cols.append(col)
+    
+    if verbose > 0: print(f"[{short_name}]\tINFO: {len(cols)} columns prefixed by {col_prefix}")        
+    return cols
 
 
 # ----------------------------------------------------------------------------------
@@ -290,7 +303,7 @@ def get_maker_list(df, verbose=0):
 def _get_data_list(df, col_name, verbose=0):
     short_name = f'get_{col_name}_list'
     items_list = set()
-    for i in range(1, 25):
+    for i in tqdm(range(1, 25), desc=f"{col_name}_list", disable=verbose<1):
         items_list = items_list | set(df[f'{col_name}{i}'].unique())
     
     if verbose>1:
@@ -304,19 +317,14 @@ def _get_data_list(df, col_name, verbose=0):
             print(f'[{short_name}]\tDEBUG : ',items_list)
     return items_list
 
-def drop_items_colums(df, verbose=0):
-    return _drop_numeroted_data_col(df=df, cols_name=["item"], verbose=verbose)
-
-def drop_makers_colums(df, verbose=0):
-    return _drop_numeroted_data_col(df=df, cols_name=["make"], verbose=verbose)
-
-def _drop_numeroted_data_col(df, cols_name, verbose=0):
+def drop_numeroted_data_col(df, cols_name, verbose=0):
     short_name = "drop_numeroted_data_col"
     n_df = df.copy()
     nb_col_droped = 0 
     if verbose>1:
-        print(f"[{short_name}]\tDEBUG : input shape {n_df.shape}")   
-    for i in range(1, 25):
+        print(f"[{short_name}]\tDEBUG : input shape {n_df.shape}")  
+        
+    for i in tqdm(range(1, 25), desc="Drop column", disable=verbose<1)  :
         for col_name in cols_name:
             try:
                 n_df = n_df.drop(columns=[f'{col_name}{i}'])
