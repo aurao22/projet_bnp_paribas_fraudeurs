@@ -1,6 +1,6 @@
 <div style="display: flex; background-color: RGB(255,114,0);" >
 <div>
-<img src="fraudeur_-_BNPP_PF_-_finale.jpg" width="300"/>
+<img src="img/fraudeur_-_BNPP_PF_-_finale.jpg" width="300"/>
 </div>
 
 # PROJET - Comment démasquer les fraudeurs ? 
