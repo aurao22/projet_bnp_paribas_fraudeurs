@@ -3,6 +3,16 @@ import numpy as np
 from sklearn.metrics import average_precision_score
 
 
+def evaluate(X_test, y_test, y_pred, verbose=0):
+    y_t_c = y_test
+    if len(y_test.shape)==1:
+        y_t_c = complete_y_cols(X_test=X_test, y_param=y_test)
+    y_p_c = y_pred
+    if len(y_pred.shape)==1:
+        y_p_c = complete_y_cols(X_test=X_test, y_param=y_pred)
+
+    return pr_auc_score(y_true=y_t_c, y_pred_proba=y_p_c), y_t_c, y_p_c
+
 
 def pr_auc_score(y_true, y_pred_proba):
     ''' 
@@ -23,6 +33,13 @@ def pr_auc_score(y_true, y_pred_proba):
     return pr_auc_score
 
 
+def complete_y_cols(X_test, y_param):
+    new_y = X_test[['ID']].copy()
+    new_y = new_y.reset_index()
+    new_y = new_y.set_index('index')
+    new_y['fraud_flag'] = y_param
+    return new_y
+
 
 # The following lines show how the csv files are read
 if __name__ == '__main__':
@@ -32,6 +49,8 @@ if __name__ == '__main__':
     y_true = pd.read_csv(y_true_path)
     y_pred_proba = pd.read_csv(y_pred_proba_path)
     print(pr_auc_score(y_true, y_pred_proba))
+
+
 
 
 
