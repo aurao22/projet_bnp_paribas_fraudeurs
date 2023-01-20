@@ -121,6 +121,8 @@ def encode_data(data_set_path,df, file_name= "encoded_data.csv", force_reloading
             print(f"[{short_name}]\tINFO : STEP 1 => encoding ITEM to features about 30 min ... START")
         # /!\ 42 min de traitement lors du forçage
         df_res = _encode_item_to_features(df=df, with_drop=with_drop,verbose=verbose)
+        df_res = df_res.reset_index()
+        df_res = df_res.set_index('index')
         df_res.to_csv(save_file_path.replace("complete", 'ITEMS'))
         df_temp = drop_numeroted_data_col(df=df_res, cols_name=["cash_price", "make", "model", "Nbr_of_prod_purchas"], verbose=verbose)
         df_temp.to_csv(save_file_path.replace("complete", 'ITEMS_light'))
@@ -176,6 +178,21 @@ def prefixed_cols(df, col_prefix, verbose=0):
     return cols
 
 
+def load_test_df(file_path, train_columns, verbose=0):
+    test_origin = pd.read_csv(file_path, sep=',',index_col="index" ,low_memory=False)
+    if verbose>0:
+        print(f"{test_origin.shape} test données chargées")
+    # Ajout des colonnes manquantes
+    test_cols = test_origin.columns
+    for col in train_columns:
+        if col not in test_cols:
+            test_origin[col] = 0
+
+    test_origin = test_origin[train_columns]
+    if verbose>0:
+        print(f"{test_origin.shape} test données mises à jour")
+    return test_origin
+
 # ----------------------------------------------------------------------------------
 #                        DATA FUNCTIONS
 # ----------------------------------------------------------------------------------
@@ -206,22 +223,28 @@ def get_fraud(df, col_extract=None, verbose=0):
 
     return extract1
 
-def transpose_categories(df, verbose=0):
+def transpose_categories(df, remove_prefix="item_", verbose=0):
     df_temp = df.loc["TOTAL"]
     type(df_temp)
     dd = pd.DataFrame(data=df_temp)
     dd = dd.sort_values(by=['TOTAL'], ascending=False)
     dict_temp = defaultdict(list)
     
-    ever_proceed = {'ID', "Nb", 'fraud'}
+    ever_proceed = {'ID', "Nb_of_items", 'fraud_flag'}
 
     for idx in dd.index:
-        cat_name = idx.split("_")[0]
+        cat_name = idx.replace("_cash", "")
+        cat_name = cat_name.replace("_nb", "")
+        if remove_prefix:
+            cat_name = cat_name.replace(remove_prefix, "")
+        else:
+            remove_prefix = ""
+
         if cat_name not in ever_proceed:
             dict_temp['cat_name'].append(cat_name)
             ever_proceed.add(cat_name)
-            cash_val = dd.loc[cat_name+"_cash", 'TOTAL']
-            nb_val = dd.loc[cat_name+"_nb", 'TOTAL']
+            cash_val = dd.loc[remove_prefix+cat_name+"_cash", 'TOTAL']
+            nb_val = dd.loc[remove_prefix+cat_name+"_nb", 'TOTAL']
             dict_temp['total_nb'].append(nb_val)
             dict_temp['total_cash'].append(cash_val)
 
@@ -376,17 +399,31 @@ def draw_correlation_graphe(df, title, annot=True, size=(18, 15), minimum_corr=F
         verbose (int, optional): Mode debug. Defaults to False.
     """
     short_name = "draw_correlation_graphe"
+    if verbose>0: print(f"[{short_name}]\tINFO : ...... START")
     corr_df = round(df.corr(), 2)
 
     if minimum_corr != False:
-        corr_df_not_0 = corr_df[(corr_df>minimum_corr)|(corr_df<(-minimum_corr))]
+
+        corr_df_not_0 = corr_df[((corr_df>minimum_corr)|(corr_df<(-minimum_corr)))]
+        # Nous ne devons pas toucher aux colonnes ci-dessous
+        for col in ['Nb_of_items', 'fraud_flag']:
+            corr_df_not_0[col] = corr_df[col]
+            corr_df_not_0.loc[col] = corr_df.loc[col] 
+            
         corr_df_not_0["NB_NAN"] = corr_df_not_0.isna().sum(axis=0)
+
         corr_df_not_0_clean = corr_df_not_0.copy()
 
         if limit_na == False:
-            limit_na = max(corr_df_not_0["NB_NAN"])
+
             if verbose>0:
-                print(f"[{short_name}]\tDEBUG : {limit_na} max NA")
+                limit_na = max(corr_df_not_0["NB_NAN"])
+                print(f"[{short_name}]\tINFO : {limit_na} max NA")
+            
+            dvc = corr_df_not_0["NB_NAN"].value_counts()
+            limit_na = min(dvc[dvc>100].index)
+            if verbose>0:
+                print(f"[{short_name}]\tINFO : {limit_na} min index de NB_NAN > 100")
 
         idxs = corr_df_not_0[corr_df_not_0['NB_NAN']>limit_na-1].index
         if verbose>0:
@@ -399,15 +436,86 @@ def draw_correlation_graphe(df, title, annot=True, size=(18, 15), minimum_corr=F
         corr_df = corr_df_not_0_clean
 
     if verbose>0:
-        print(f"[{short_name}]\tINFO : CORR ------------------")
-        print(f"[{short_name}]\tINFO : {corr_df}")
+        print(f"[{short_name}]\tINFO : Confusion matrix created")
+        if verbose>1:
+            print(f"[{short_name}]\tDEBUG : CORR ------------------")
+            print(f"[{short_name}]\tDEBUG : {corr_df}")
 
     figure, ax = color_graph_background(1,1)
     figure.set_size_inches(size[0], size[1], forward=True)
     figure.set_dpi(100)
-    figure.suptitle(title, fontsize=16)
+    figure.suptitle(title + f" (minimum_corr={minimum_corr}, limit_na={limit_na})", fontsize=16)
     sns.heatmap(corr_df, annot=annot, annot_kws={"fontsize":fontsize})
     plt.xticks(rotation=45, ha="right", fontsize=fontsize)
     plt.yticks(fontsize=fontsize)
     plt.show()
     return corr_df
+
+
+def draw_graph_multiple(graph_function, df, column_names, title="Répartition",index_name='cat_name', size=(20, 15), verbose=0):
+    """Fonction pour dessiner un graphe pie pour la colonne reçue
+
+    Args:
+        df (DataFrame): Données à représenter
+        column_name (String): colonne à représenter
+        country_name_list (list[String], optional): Liste des pays à traiter. Defaults to [].
+        verbose (bool, optional): Mode debug. Defaults to False.
+    """
+    figure, axes = plt.subplots(1,len(column_names))
+    i = 0
+    for column_name in column_names:
+        if len(column_names) > 1:
+            graph_function(df, column_name, axes[i],index_name=index_name, verbose=verbose)
+        else:
+            graph_function(df, column_name, axes,index_name=index_name, verbose=verbose)
+        i += 1
+    figure.set_size_inches(size[0], size[1], forward=True)
+    figure.set_dpi(100)
+    figure.patch.set_facecolor(PLOT_FIGURE_BAGROUNG_COLOR)
+    figure.suptitle(f"{title} : "+column_name, fontsize=16)
+    plt.grid()
+    plt.show()
+    print("draw_graph_multiple", column_name," ................................................. END")
+
+
+def draw_barh(df_param, column_name,  axe, index_name='cat_name',verbose=0):
+    
+    df = df_param.copy()
+    df = df.sort_values(column_name, ascending=False)
+        
+    axe.barh(y=df[index_name], width=df[column_name])
+    # axe.barh(y=df[index_name], width=df[column_name], labels=df[index_name], autopct='%.0f%%')
+    axe.set_facecolor(PLOT_BAGROUNG_COLOR)
+    axe.set_title(column_name)
+    axe.set_facecolor(PLOT_BAGROUNG_COLOR)
+
+def draw_barh_multiple(df, column_names, title="Répartition",index_name='cat_name', size=(20, 15), verbose=0):
+    draw_graph_multiple(graph_function=draw_barh, df=df, column_names=column_names, title=title, index_name=index_name, size=size, verbose=verbose)
+
+
+def draw_pie(df, column_name,  axe, index_name='cat_name',verbose=0):
+    """Fonction pour dessiner un graphe pie pour la colonne reçue
+    Args:
+        df (DataFrame): Données à représenter
+        column_name (String): colonne à représenter
+        country_name_list (list[String], optional): Liste des pays à traiter. Defaults to [].
+        verbose (bool, optional): Mode debug. Defaults to False.
+    """
+    
+    # Affichage des graphiques
+    axe.pie(df[column_name], labels=df[index_name], autopct='%.0f%%')
+    axe.legend(df[index_name], loc='best')
+    axe.set_title(column_name)
+    axe.set_facecolor(PLOT_BAGROUNG_COLOR)
+
+
+def draw_pie_multiple(df, column_names, title="Répartition",index_name='cat_name', size=(20, 15), verbose=0):
+    """Fonction pour dessiner un graphe pie pour la colonne reçue
+
+    Args:
+        df (DataFrame): Données à représenter
+        column_name (String): colonne à représenter
+        country_name_list (list[String], optional): Liste des pays à traiter. Defaults to [].
+        verbose (bool, optional): Mode debug. Defaults to False.
+    """
+    draw_graph_multiple(graph_function=draw_pie, df=df, column_names=column_names, title=title, index_name=index_name, size=size, verbose=verbose)
