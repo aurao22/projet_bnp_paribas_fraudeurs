@@ -129,3 +129,5 @@ dmypy.json
 .pyre/
 _OLD/*
 dataset/_OLD/*
+dataset/*.bak
+*.bak
