@@ -1,12 +1,18 @@
 import numpy as np
+import pandas as pd
 
 from sklearn.metrics import average_precision_score
 
 
 def evaluate(X_test, y_test, y_pred, verbose=0):
     y_t_c = y_test
-    if len(y_test.shape)==1:
+    if len(y_test.shape)==1 or y_test.shape[1]==1:
         y_t_c = complete_y_cols(X_test=X_test, y_param=y_test)
+    try:
+        y_t_c = y_t_c.drop('index', axis=1)
+    except:
+        pass
+
     y_p_c = y_pred
     if len(y_pred.shape)==1:
         y_p_c = complete_y_cols(X_test=X_test, y_param=y_pred)

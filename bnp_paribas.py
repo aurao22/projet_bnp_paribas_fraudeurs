@@ -3,11 +3,13 @@ import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 import pandas as pd
-from os import listdir
-from os.path import isfile, join, exists, getsize
+from os.path import join, exists, getsize
 from copy import deepcopy
 from collections import defaultdict
 from tqdm import tqdm
+from datetime import datetime
+
+from pr_auc_score_SB05ixL import complete_y_cols, evaluate
 
 CARD_COLS_START = ['item', 'model', 'goods_code', 'cash_price', 'make','Nbr_of_prod_purchas']
 
@@ -182,17 +184,100 @@ def load_test_df(file_path, train_columns, verbose=0):
     test_origin = pd.read_csv(file_path, sep=',',index_col="index" ,low_memory=False)
     if verbose>0:
         print(f"{test_origin.shape} test données chargées")
+    
     # Ajout des colonnes manquantes
+    test_origin = add_amounts(test_origin, verbose=verbose)
+
     test_cols = test_origin.columns
     for col in train_columns:
         if col not in test_cols:
             test_origin[col] = 0
-
+    
     test_origin = test_origin[train_columns]
     if verbose>0:
         print(f"{test_origin.shape} test données mises à jour")
     return test_origin
 
+def add_amounts(x_df_input, verbose=0):
+    ncol_item = "amount"
+    
+    x_df = x_df_input.copy()
+    cols = sorted(list(x_df.columns))
+    start = False
+    if ncol_item not in cols:
+        x_df[ncol_item] = 0
+                
+        for col in cols:
+            if col.lower().startswith("item_"):
+                start = True
+                if col.lower().endswith("_cash"):
+                    x_df[col] = x_df[col].fillna(0)
+                    x_df[ncol_item] = x_df[ncol_item] + x_df[col]
+            # On sort de la boucle dès que le nom de colonne ne commence pas par item
+            elif start:
+                break
+    return x_df
+
+# ----------------------------------------------------------------------------------
+#                        DATASET FUNCTION
+# ----------------------------------------------------------------------------------
+from sklearn.model_selection import train_test_split
+from os.path import exists
+
+_DATASET_KEYS = ["X_train", "X_test", "y_train", "y_test"]
+
+def load_splited_data(dataset_path, test_size = 0.2, random_state = 42, save_it=True, force=False, verbose=0):
+    short_name="load_splited_data"
+    
+    dataset_dict = {}
+
+    if not force:
+        for set_name in _DATASET_KEYS:
+            file_name = dataset_path.replace(".csv", f"_split_{set_name}.csv")
+            if exists(file_name):
+                if verbose>0:info(short_name, f"Loading {set_name}...")
+                dataset_dict[set_name] = pd.read_csv(file_name, sep=',', low_memory=False)
+                if set_name.startswith("X_"):
+                    dataset_dict[set_name] = add_amounts(dataset_dict[set_name], verbose=verbose)
+            else:
+                break
+        
+    # si les fichiers split n'existent pas :
+    if force or len(dataset_dict) < 4:       
+        
+        if verbose > 0: info(short_name, f"Chargement des données train sources...")
+        train_origin = pd.read_csv(dataset_path, sep=',', index_col="index" ,low_memory=False)
+        dataset_dict['train_origin'] = train_origin
+        if verbose > 0: info(short_name,f"Train d'originr {train_origin.shape} {surligne_text('LOAD')}")
+
+        if verbose > 0: info(short_name, f"Séparation de X et y...")
+        target = 'fraud_flag'
+        columns = list(train_origin.columns)
+        if verbose > 1: debug(short_name, len(columns))
+        columns.remove(target)
+        if verbose > 1: debug(short_name, len(columns))
+        X = train_origin[columns]
+        y = train_origin[target]
+
+        if verbose > 0: info(short_name, f"Split du dataset_path...")
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_size, random_state=random_state)
+        
+        # Ajout des données manquantes
+        X_train = add_amounts(X_train, verbose=verbose)
+        X_test  = add_amounts(X_test, verbose=verbose)
+
+        y_train = complete_y_cols(X_test=X_train, y_param=y_train) 
+        y_test  = complete_y_cols(X_test=X_test, y_param=y_test) 
+
+        for dataset_name, dataset in zip(_DATASET_KEYS, [X_train, X_test, y_train, y_test]):
+            dataset_dict[dataset_name] = dataset
+            if save_it and dataset is not None:
+                dataset.to_csv(dataset_path.replace(".csv", f"_split_{dataset_name}.csv"))
+                    
+    if verbose > 0:
+        info(short_name, f"{len(dataset_dict)} dataset {surligne_text('LOAD')}")
+        if len(dataset_dict)>0: info(short_name, f"{dataset_dict.get(_DATASET_KEYS[0]).shape} / {dataset_dict.get(_DATASET_KEYS[1]).shape}")
+    return dataset_dict
 # ----------------------------------------------------------------------------------
 #                        DATA FUNCTIONS
 # ----------------------------------------------------------------------------------
@@ -361,8 +446,201 @@ def drop_numeroted_data_col(df, cols_name, verbose=0):
             print(f"[{short_name}]\tDEBUG : output shape {n_df.shape}")   
     return n_df
 
+# ----------------------------------------------------------------------------------
+#                        MODEL FUNCTION
+# ----------------------------------------------------------------------------------
+def train_model(model, model_name, 
+                dataset_dict, data_set_path, 
+                scores,score_path, 
+                params, features="ALL", add_data=np.nan,commentaire=np.nan,target="fraud_flag", 
+                verbose=0):
+    short_name = "train_model"
+    if verbose>1:debug(short_name, f"{model_name} model fiting...")
+    model.fit(dataset_dict.get("X_train"), dataset_dict.get("y_train")[target])
 
+    if verbose>1:debug(short_name,f"Model evaluation...")
+    score_accuracy = model.score(dataset_dict.get("X_test"), dataset_dict.get("y_test")[target])
+    y_pred = model.predict(dataset_dict.get("X_test"))
+    pr_auc_score_, _, _ = evaluate(X_test=dataset_dict.get("X_test"), y_test=dataset_dict.get("y_test"), y_pred=y_pred, verbose=verbose)
+    if verbose>0:info(short_name,f"accuracy score : {score_accuracy}, pr_auc score : {pr_auc_score_}")
 
+    test_origin = dataset_dict.get("test_origin", None)
+    if test_origin is not None:
+        if verbose>0:info(short_name,f"Prediction for test orgine...")
+        y_pred_test = model.predict(test_origin)
+        y_pred_test_complete = complete_y_cols(X_test=test_origin, y_param=y_pred_test)
+
+        res_path = join(data_set_path, 'official_test_predictions', model_name+"_"+features+"_"+datetime.now().strftime('%Y-%m-%d-%H_%M')+".csv")
+        y_pred_test_complete.to_csv(res_path)
+    elif verbose>0:info(short_name,f"No prediction for test orgine")
+
+    if verbose>1:debug(short_name,f"Add score...")
+    n_scores = add_score(scores_param=scores, modele=model_name, features=features, add_data=add_data, 
+            params=params, 
+            accuracy_score=score_accuracy, pr_auc_score_TEST_perso=pr_auc_score_,
+            commentaire=commentaire,
+            score_path=score_path.replace(".csv", f"{datetime.now().strftime('%Y-%m-%d_%H-%M')}.csv"),
+            verbose=verbose)
+
+    return model, n_scores
+
+from sklearn.linear_model import LogisticRegression
+def train_LogisticRegression(dataset_dict, data_set_path, 
+                            scores, score_path, 
+                            features="ALL", add_data=np.nan,commentaire=np.nan, 
+                            verbose=0):
+    
+    if verbose>1:print(f"Model creation...")
+    my_fist_model = LogisticRegression(penalty="l2", fit_intercept=True,solver='liblinear')
+    params="penalty='l2', fit_intercept=True,solver='liblinear'"
+
+    model, n_scores = train_model(model=my_fist_model, model_name="LogisticRegression", 
+                                dataset_dict=dataset_dict, data_set_path=data_set_path, scores=scores, score_path=score_path, params=params, features=features,
+                                add_data=add_data,commentaire=commentaire, verbose=verbose)
+    
+    return model, n_scores
+
+import lightgbm as lgb
+def train_LGBMClassifier(dataset_dict, data_set_path, 
+                            scores, score_path, 
+                            features="ALL", add_data=np.nan,commentaire=np.nan, 
+                            verbose=0):
+    
+    if verbose>1:print(f"Model creation...")
+    lgb_classifier = lgb.LGBMClassifier(boosting_type='goss',  
+                                    max_depth=5, 
+                                    learning_rate=0.1,
+                                    n_estimators=1000, 
+                                    subsample=0.8,  
+                                    colsample_bytree=0.6,
+                                   )
+    params="boosting_type='goss', max_depth=5,learning_rate=0.1,n_estimators=1000.subsample=0.8,colsample_bytree=0.6"
+    model, n_scores = train_model(model=lgb_classifier, model_name="LGBMClassifier", 
+                                dataset_dict=dataset_dict, data_set_path=data_set_path, scores=scores, score_path=score_path, params=params, features=features,
+                                add_data=add_data,commentaire=commentaire, verbose=verbose)
+    return model, n_scores
+
+from imblearn.over_sampling import RandomOverSampler
+def over_dataset_with_RandomOverSampler(X_train,y_train,data_set_path, expected_val, random_state=42, target = 'fraud_flag', verbose=0):
+    short_name = "over_RandomOverSampler"
+    over_file_name = "train_complete_OVER_RandomOverSampler_"
+    res_path = data_set_path.replace("train_complete_", over_file_name)
+    dataset_over = None
+    if exists(res_path):
+        dataset_over = pd.read_csv(res_path) 
+        if verbose > 0: info(short_name, f"{res_path} {surligne_text('LOAD')}")
+    else:
+        # Choix de la taille du nouveau dataset 
+        distribution_of_samples = {0:expected_val, 1:expected_val}
+        # Sur-Echantillonnage en utilisant la méthode SMOTE
+        smote = RandomOverSampler(sampling_strategy = distribution_of_samples, random_state = random_state)
+        # X_over_sample, y_over_sample = smote.fit_resample(X,y)
+        dataset_over, y_train_over = smote.fit_resample(X_train,y_train[target])
+        if verbose > 0: info(short_name, f"{dataset_over.shape}, {y_train_over.shape}")
+        if verbose > 1: debug(short_name, f"{y_train_over.value_counts()}")
+
+        dataset_over[target] = y_train_over
+        dataset_over.to_csv(res_path)
+        if verbose > 0: info(short_name, f"{res_path} {surligne_text('SAVE')}")
+    return dataset_over
+    
+from imblearn.over_sampling import SMOTE
+
+def over_dataset_with_SMOTE(X_train,y_train,data_set_path, sampling_strategy='minority', random_state=42, target = 'fraud_flag', verbose=0):
+    short_name = "over_SMOTE"
+    over_file_name = "train_complete_OVER_SMOTE_"+sampling_strategy+"_"
+    res_path = data_set_path.replace("train_complete_", over_file_name)
+    dataset_over = None
+    if exists(res_path):
+        dataset_over = pd.read_csv(res_path) 
+        if verbose > 0: info(short_name, f"{res_path} {surligne_text('LOAD')}")
+    else:
+        # Sur-Echantillonnage en utilisant la méthode SMOTE
+        smote = SMOTE(sampling_strategy=sampling_strategy, random_state=random_state, k_neighbors=5)
+        dataset_over, y_train_over = smote.fit_resample(X_train,y_train[target])
+        if verbose > 0: info(short_name, f"{dataset_over.shape}, {y_train_over.shape}")
+        if verbose > 1: debug(short_name, f"{y_train_over.value_counts()}")
+
+        dataset_over[target] = y_train_over
+        dataset_over.to_csv(res_path)
+        if verbose > 0: info(short_name, f"{res_path} {surligne_text('SAVE')}")
+    return dataset_over
+
+from imblearn.over_sampling import BorderlineSMOTE
+
+def over_dataset_with_BorderlineSMOTE(X_train,y_train,data_set_path, target = 'fraud_flag', verbose=0):
+    short_name = "over_BorderlineSMOTE"
+    over_file_name = "train_complete_OVER_BorderlineSMOTE_"
+    res_path = data_set_path.replace("train_complete_", over_file_name)
+    dataset_over = None
+    if exists(res_path):
+        dataset_over = pd.read_csv(res_path) 
+        if verbose > 0: info(short_name, f"{res_path} {surligne_text('LOAD')}")
+    else:
+        # Sur-Echantillonnage en utilisant la méthode SMOTE
+        smote = BorderlineSMOTE()
+        dataset_over, y_train_over = smote.fit_resample(X_train,y_train[target])
+        if verbose > 0: info(short_name, f"{dataset_over.shape}, {y_train_over.shape}")
+        if verbose > 1: debug(short_name, f"{y_train_over.value_counts()}")
+
+        dataset_over[target] = y_train_over
+        dataset_over.to_csv(res_path)
+        if verbose > 0: info(short_name, f"{res_path} {surligne_text('SAVE')}")
+    return dataset_over
+# ----------------------------------------------------------------------------------
+#                        SCORE
+# ----------------------------------------------------------------------------------
+def save_score(scores, score_path):
+    index_label ="date"
+    if index_label in list(scores.columns):
+        index_label ="index"
+    scores.to_csv(score_path, sep='|', index_label =index_label)
+
+def load_scores(score_path, save_it=False, verbose=0):
+    scores = pd.read_csv(score_path, sep='|', index_col="date")
+    # scores = scores[['date', 'Modèle', 'Features', 'Add Data', 'Accuracy Score',  'pr_auc_score TEST perso', 'pr_auc_score TEST officiel', 'Commentaire', 'Params']]
+    for col in ['Accuracy Score',  'pr_auc_score TEST perso', 'pr_auc_score TEST officiel']:
+        try:
+            scores.loc[scores[col]=="", col] = np.nan
+        except Exception as err:
+            if verbose>1: print(err)
+        try:
+            scores[col] = scores[col].fillna(0)
+        except Exception as err:
+            if verbose>1: print(err)
+        try:
+            scores[col] = scores[col].astype(float)
+        except Exception as err:
+            if verbose>1: print(err)
+    if save_it:
+        save_score(scores=scores, score_path=score_path)
+    return scores
+
+def add_score(scores_param, modele, features, add_data, params, accuracy_score=0,	pr_auc_score_TEST_perso=0,	pr_auc_score_TEST_officiel=0, commentaire=np.nan, score_path=None,verbose=0):
+    short_name = "add_score"
+    data_dict = {
+        'date' : [datetime.now().strftime('%Y-%m-%d %H:%M')],
+        'Modèle' : [modele],
+        'Features' : [features], 
+        'Add Data' : [add_data],
+        'Accuracy Score':[accuracy_score],
+        'pr_auc_score TEST perso':[pr_auc_score_TEST_perso],
+        'pr_auc_score TEST officiel':[pr_auc_score_TEST_officiel], 
+        'Params':[params.replace('"', "'") if isinstance(params, str) else params],
+        'Commentaire':[commentaire.replace('"', "'") if isinstance(commentaire, str) else commentaire],
+    }
+    if verbose>1:
+        debug(short_name, data_dict)
+    to_add = pd.DataFrame.from_dict(data_dict)
+    scores = None
+    if scores_param is None:
+        scores = to_add
+    else:
+        scores = pd.concat([scores_param.reset_index(), to_add])
+        scores = scores.set_index('date')
+    if score_path is not None and len(score_path)>0:
+        save_score(scores=scores, score_path=score_path)
+    return scores
 # ----------------------------------------------------------------------------------
 #                        GRAPHIQUES
 # ----------------------------------------------------------------------------------
@@ -519,3 +797,93 @@ def draw_pie_multiple(df, column_names, title="Répartition",index_name='cat_nam
         verbose (bool, optional): Mode debug. Defaults to False.
     """
     draw_graph_multiple(graph_function=draw_pie, df=df, column_names=column_names, title=title, index_name=index_name, size=size, verbose=verbose)
+
+def plot_scatters(Xs, ys, titles, target="fraud_flag", size=(20, 10), verbose=0):
+    labels = ['OK', 'FRAUD']
+    figure, axes = color_graph_background(ligne=len(Xs), colonne=1)
+
+    # scatter plot of examples by class label
+    i = 0
+    for X, y, title in zip(Xs, ys, titles):
+        for label in y[target].unique():
+            axes[i].scatter(X.loc[y[target]==label, 'amount'], X.loc[y[target]==label, 'Nb_of_items'], label=labels[label])
+        axes[i].set_title(title)
+        i += 1
+    
+    figure.set_size_inches(size[0], size[1], forward=True)
+    figure.set_dpi(100)
+    figure.patch.set_facecolor(PLOT_FIGURE_BAGROUNG_COLOR)
+    figure.suptitle(f"{target} repartition", fontsize=16)
+    
+
+def plot_scatter(X, y, target="fraud_flag", figsize=(20, 10), verbose=0):
+    labels = ['OK', 'FRAUD']
+    # scatter plot of examples by class label
+    plt.figure(figsize=figsize, dpi=100)
+    for label in y[target].unique():
+        plt.scatter(X.loc[y[target]==label, 'amount'], X.loc[y[target]==label, 'Nb_of_items'], label=labels[label])
+    plt.legend()
+    plt.show()    
+
+# ----------------------------------------------------------------------------------
+#                        PRINT
+# ----------------------------------------------------------------------------------
+from termcolor import colored
+
+COLORS = {
+    "default" : (6,42,30),
+    "green" : (6,42,30),
+    "blue" : (13,36,81),
+    "red" : (74,40,34),
+    "yellow" : (87,82,9),
+}
+
+COLOR_MOD = {
+    'DEBUG' : 'blue',
+    'WARN'  : 'yellow',
+    'ERROR' : 'red',
+}
+
+def display(function_name, text, now=None, duration=None, key='INFO', color=None, log_end=""):
+    log = f"[{function_name:<20}]\t{key.upper():<5} {text}"
+    
+    log = f"{log} {log_end:>25}"
+    
+    if now is not None and duration is not None:
+        now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        end_ = f"\t\t END {now} ---> in {duration}"
+        log = log + f"{end_:>60}"
+    elif now is not None:
+        now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        end_ = f"\t\t START {now}"
+        log = log + f"{end_:>38}" 
+            
+    if color is not None:
+        log = colored(log, color)
+        
+    print(log)
+    return log
+
+# %% colored
+def info(function_name, text, now=None, duration=None, log_end=""):
+    key='INFO'
+    return display(function_name=function_name, text=text, now=now, duration=duration, key=key, color= COLOR_MOD.get(key, None), log_end=log_end)
+
+def debug(function_name, text, now=None, duration=None, log_end=""):
+    key='DEBUG'
+    return display(function_name=function_name, text=text, now=now, duration=duration, key=key, color= COLOR_MOD.get(key, None), log_end=log_end)
+
+def warn(function_name, text, now=None, duration=None, log_end=""):
+    key='WARN'
+    return display(function_name=function_name, text=text, now=now, duration=duration, key=key, color= COLOR_MOD.get(key, None), log_end=log_end)
+    
+def error(function_name, text, now=None, duration=None, log_end=""):
+    key='ERROR'
+    return display(function_name=function_name, text=text, now=now, duration=duration, key=key, color= COLOR_MOD.get(key, None), log_end=log_end)
+
+def surligne_text(text, color="green"):
+    r = COLORS.get(color,COLORS["default"])[0] 
+    g = COLORS.get(color,COLORS["default"])[1] 
+    b = COLORS.get(color,COLORS["default"])[2] 
+    return f'\x1b[{r};{b};{g}m{text}\x1b[0m'
+
