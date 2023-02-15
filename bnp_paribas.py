@@ -3,7 +3,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 import pandas as pd
-from os.path import join, exists, getsize
+from os.path import join, exists, getsize, dirname
 from copy import deepcopy
 from collections import defaultdict
 from tqdm import tqdm
@@ -108,6 +108,31 @@ def pre_processing(X, y=None,save_file_path = None, verbose=0):
 
     return dataset_train
 
+def reduce_data_by_typing(df, verbose=0):
+    """ Round float data to x.xx and convert float64 nb to int8 and float data float16
+
+    Args:
+        df (DataFrame): _description_
+        verbose (int, optional): _description_. Defaults to 0.
+
+    Returns:
+        _type_: _description_
+    """
+    short_name = "reduce_data_by_typing"
+    if verbose>0:info(short_name, f"{df.dtypes}")
+    for col in df.columns:
+        if df[col].dtype == 'float64':
+            if col.endswith('_nb') or col in ['Nb_of_items']:
+                df[col] = df[col].round(decimals=0)
+                df[col] = df[col].astype("int8")
+            else:
+                df[col] = df[col].round(decimals=2)
+                df[col] = df[col].astype("float16")
+        elif df[col].dtype == 'int64' and col not in ['index', 'ID']:
+            df[col] = df[col].astype("int8")
+    if verbose>0:info(short_name, f"{df.dtypes}")
+    return df
+
 def encode_data(data_set_path,df, file_name= "encoded_data.csv", force_reloading=0, with_drop=1,verbose=0):
     short_name = "encode_data"
     df_res = None
@@ -170,6 +195,16 @@ def _encode_numeroted_data_to_features(df, data_list, data_col_name='item', with
     return df_res
 
 def prefixed_cols(df, col_prefix, verbose=0):
+    """Prefix the column name
+
+    Args:
+        df (_type_): _description_
+        col_prefix (_type_): _description_
+        verbose (int, optional): _description_. Defaults to 0.
+
+    Returns:
+        list(str): _description_
+    """
     short_name = "prefixed_cols"
     cols = []
     for col in df.columns:
@@ -179,26 +214,53 @@ def prefixed_cols(df, col_prefix, verbose=0):
     if verbose > 0: print(f"[{short_name}]\tINFO: {len(cols)} columns prefixed by {col_prefix}")        
     return cols
 
+def load_test_df(file_path, train_columns, force=False, verbose=0):
+    """Load the official test df and add : amount and reducre data by typing, then save the new df.
+    If the df have been save, just load it.
 
-def load_test_df(file_path, train_columns, verbose=0):
-    test_origin = pd.read_csv(file_path, sep=',',index_col="index" ,low_memory=False)
-    if verbose>0:
-        print(f"{test_origin.shape} test données chargées")
-    
-    # Ajout des colonnes manquantes
-    test_origin = add_amounts(test_origin, verbose=verbose)
+    Args:
+        file_path (str): _description_
+        train_columns (list(str)): _description_
+        verbose (int, optional): _description_. Defaults to 0.
 
-    test_cols = test_origin.columns
-    for col in train_columns:
-        if col not in test_cols:
-            test_origin[col] = 0
-    
-    test_origin = test_origin[train_columns]
+    Returns:
+        DataFrame: _description_
+    """
+    short_name = "load_test_df"
+    test_origin = None
+    save_path = file_path.replace(".csv", "_rounded.csv")
+    if not exists(save_path) or force:
+        test_origin = pd.read_csv(file_path, sep=',',index_col="index" ,low_memory=False)
+        # Ajout des colonnes manquantes
+        test_origin = add_amounts(test_origin, verbose=verbose)
+
+        test_cols = test_origin.columns
+        for col in train_columns:
+            if col not in test_cols:
+                test_origin[col] = 0
+        
+        test_origin = test_origin[train_columns]
+        test_origin = reduce_data_by_typing(df=test_origin, verbose=verbose)
+        test_origin.to_csv(save_path, index_label="index")
+        if verbose>0:
+            info(short_name, f"{test_origin.shape} test données mises à jour")
+    else:
+        test_origin = pd.read_csv(save_path, sep=',',index_col="index" ,low_memory=False)
+
     if verbose>0:
-        print(f"{test_origin.shape} test données mises à jour")
+        info(short_name, f"{test_origin.shape} test données chargées")
     return test_origin
 
 def add_amounts(x_df_input, verbose=0):
+    """Add the amount column, sum of all item cas column
+
+    Args:
+        x_df_input (DataFrame): _description_
+        verbose (int, optional): _description_. Defaults to 0.
+
+    Returns:
+        DataFrame: new df
+    """
     ncol_item = "amount"
     
     x_df = x_df_input.copy()
@@ -226,21 +288,29 @@ from os.path import exists
 
 _DATASET_KEYS = ["X_train", "X_test", "y_train", "y_test"]
 
-def load_splited_data(dataset_path, test_size = 0.2, random_state = 42, save_it=True, force=False, verbose=0):
+def load_splited_data(dataset_path, over_name=None, test_size = 0.2, random_state = 42, save_it=True, force=False, target = 'fraud_flag', verbose=0):
     short_name="load_splited_data"
-    
+    if verbose > 0: info(short_name, surligne_text('IN PROGRESS...'))
     dataset_dict = {}
-
     if not force:
         for set_name in _DATASET_KEYS:
-            file_name = dataset_path.replace(".csv", f"_split_{set_name}.csv")
-            if exists(file_name):
-                if verbose>0:info(short_name, f"Loading {set_name}...")
-                dataset_dict[set_name] = pd.read_csv(file_name, sep=',', low_memory=False)
-                if set_name.startswith("X_"):
-                    dataset_dict[set_name] = add_amounts(dataset_dict[set_name], verbose=verbose)
-            else:
-                break
+            if set_name not in list(dataset_dict.keys()):
+                if over_name is not None and len(over_name)>0 and set_name == "X_train":
+                    if verbose > 0: info(short_name, f"over {over_name} Loading {set_name}...")
+                    path = dirname(dataset_path)
+                    over_path = join(path,OVERED_DATASET_FILE_NAME.get(over_name))
+                    dataset_over = load_over_dataset(path=over_path, verbose=verbose)
+                    dataset_dict["y_train"] = dataset_over[['ID',target]]
+                    dataset_dict[set_name] = dataset_over.drop([target], axis=1)
+                    continue
+                
+                file_name = dataset_path.replace(".csv", f"_split_{set_name}.csv")
+                if dataset_dict.get(set_name, None) is None and exists(file_name):
+                    if verbose > 0: info(short_name, f"set {set_name} Loading {set_name}...")
+                    dataset_dict[set_name] = pd.read_csv(file_name, sep=',', low_memory=False)
+                    if set_name.startswith("X_"):
+                        dataset_dict[set_name] = add_amounts(dataset_dict[set_name], verbose=verbose)
+                        dataset_dict[set_name] = reduce_data_by_typing(df=dataset_dict[set_name], verbose=verbose)
         
     # si les fichiers split n'existent pas :
     if force or len(dataset_dict) < 4:       
@@ -250,8 +320,7 @@ def load_splited_data(dataset_path, test_size = 0.2, random_state = 42, save_it=
         dataset_dict['train_origin'] = train_origin
         if verbose > 0: info(short_name,f"Train d'originr {train_origin.shape} {surligne_text('LOAD')}")
 
-        if verbose > 0: info(short_name, f"Séparation de X et y...")
-        target = 'fraud_flag'
+        if verbose > 0: info(short_name, f"Séparation de X et y...")      
         columns = list(train_origin.columns)
         if verbose > 1: debug(short_name, len(columns))
         columns.remove(target)
@@ -270,6 +339,7 @@ def load_splited_data(dataset_path, test_size = 0.2, random_state = 42, save_it=
         y_test  = complete_y_cols(X_test=X_test, y_param=y_test) 
 
         for dataset_name, dataset in zip(_DATASET_KEYS, [X_train, X_test, y_train, y_test]):
+            dataset = reduce_data_by_typing(df=dataset, verbose=verbose)
             dataset_dict[dataset_name] = dataset
             if save_it and dataset is not None:
                 dataset.to_csv(dataset_path.replace(".csv", f"_split_{dataset_name}.csv"))
@@ -488,13 +558,14 @@ from sklearn.linear_model import LogisticRegression
 def train_LogisticRegression(dataset_dict, data_set_path, 
                             scores, score_path, 
                             features="ALL", add_data=np.nan,commentaire=np.nan, 
+                            penalty="l2", fit_intercept=True,solver='liblinear',
                             verbose=0):
-    
-    if verbose>1:print(f"Model creation...")
-    my_fist_model = LogisticRegression(penalty="l2", fit_intercept=True,solver='liblinear')
-    params="penalty='l2', fit_intercept=True,solver='liblinear'"
+    model_name="LogisticRegression"
+    if verbose>1:debug(model_name, f"Model creation...")
+    my_fist_model = LogisticRegression(penalty=penalty, fit_intercept=fit_intercept,solver=solver)
+    params=f"penalty='{penalty}', fit_intercept={fit_intercept},solver='{solver}'"
 
-    model, n_scores = train_model(model=my_fist_model, model_name="LogisticRegression", 
+    model, n_scores = train_model(model=my_fist_model, model_name=model_name, 
                                 dataset_dict=dataset_dict, data_set_path=data_set_path, scores=scores, score_path=score_path, params=params, features=features,
                                 add_data=add_data,commentaire=commentaire, verbose=verbose)
     
@@ -504,89 +575,152 @@ import lightgbm as lgb
 def train_LGBMClassifier(dataset_dict, data_set_path, 
                             scores, score_path, 
                             features="ALL", add_data=np.nan,commentaire=np.nan, 
+                            boosting_type='goss', max_depth=5, learning_rate=0.1, n_estimators=1000, 
+                            subsample=0.8,colsample_bytree=0.6,
                             verbose=0):
     
-    if verbose>1:print(f"Model creation...")
-    lgb_classifier = lgb.LGBMClassifier(boosting_type='goss',  
-                                    max_depth=5, 
-                                    learning_rate=0.1,
-                                    n_estimators=1000, 
-                                    subsample=0.8,  
-                                    colsample_bytree=0.6,
+    model_name="LGBMClassifier"
+    if verbose>1:debug(model_name, f"Model creation...")
+    lgb_classifier = lgb.LGBMClassifier(boosting_type=boosting_type,  
+                                    max_depth=max_depth, 
+                                    learning_rate=learning_rate,
+                                    n_estimators=n_estimators, 
+                                    subsample=subsample,  
+                                    colsample_bytree=colsample_bytree,
                                    )
-    params="boosting_type='goss', max_depth=5,learning_rate=0.1,n_estimators=1000.subsample=0.8,colsample_bytree=0.6"
-    model, n_scores = train_model(model=lgb_classifier, model_name="LGBMClassifier", 
+    params=f"boosting_type='{boosting_type}', max_depth={max_depth},learning_rate={learning_rate},n_estimators={n_estimators}.subsample={subsample},colsample_bytree={colsample_bytree}"
+    model, n_scores = train_model(model=lgb_classifier, model_name=model_name, 
                                 dataset_dict=dataset_dict, data_set_path=data_set_path, scores=scores, score_path=score_path, params=params, features=features,
                                 add_data=add_data,commentaire=commentaire, verbose=verbose)
     return model, n_scores
 
+
+from sklearn.ensemble import RandomForestClassifier
+def train_RandomForestClassifier(dataset_dict, data_set_path, 
+                            scores, score_path, 
+                            features="ALL", add_data=np.nan,commentaire=np.nan, 
+                            random_state=42,max_depth=2,n_estimators=1000, 
+                            verbose=0):
+    
+    model_name="RandomForestClassifier"
+    if verbose>1:debug(model_name, f"Model creation...")
+    my_fist_model = RandomForestClassifier(max_depth=max_depth, random_state=random_state, n_estimators=n_estimators)
+    params=f"random_state={random_state},max_depth={max_depth},n_estimators={n_estimators}"
+
+    model, n_scores = train_model(model=my_fist_model, model_name=model_name, 
+                                dataset_dict=dataset_dict, data_set_path=data_set_path, scores=scores, score_path=score_path, params=params, features=features,
+                                add_data=add_data,commentaire=commentaire, verbose=verbose)
+    
+    return model, n_scores
+
+from sklearn.ensemble import GradientBoostingClassifier
+def train_GradientBoostingClassifier(dataset_dict, data_set_path, 
+                            scores, score_path, 
+                            features="ALL", add_data=np.nan,commentaire=np.nan, 
+                            random_state=42,max_depth=2,n_estimators=1000, 
+                            verbose=0):
+    
+    model_name="GradientBoostingClassifier"
+    if verbose>1:debug(model_name, f"Model creation...")
+    my_fist_model = GradientBoostingClassifier(max_depth=max_depth, random_state=random_state, n_estimators=n_estimators)
+    params=f"random_state={random_state},max_depth={max_depth},n_estimators={n_estimators}"
+
+    model, n_scores = train_model(model=my_fist_model, model_name=model_name, 
+                                dataset_dict=dataset_dict, data_set_path=data_set_path, scores=scores, score_path=score_path, params=params, features=features,
+                                add_data=add_data,commentaire=commentaire, verbose=verbose)
+    
+    return model, n_scores
+
+start_ = "train_complete_encoded_hyper_light_2023_01_19_split_dataset_train_OVER_"
+
+OVERED_DATASET_FILE_NAME = {
+    "BorderlineSMOTE"            : start_+"BorderlineSMOTE.csv",
+    "RandomOverSampler"          : start_+"RandomOverSampler.csv",
+    "RandomOverSampler amount less" : start_+"RandomOverSampler1.csv",
+    "SMOTE_minority"             : start_+"SMOTE_minority.csv",
+    "SMOTE_minority amount less" : start_+"SMOTE_minority1.csv",
+    "SVMSMOTE"                   : start_+"SVMSMOTE.csv",
+}
+
+def load_over_dataset(path, verbose=0):
+    short_name = "load_over_dataset"
+    dataset_over = None
+    # Chargement des données
+    save_path = path.replace(".csv", "_rounded.csv")
+    if not exists(save_path):
+        dataset_over = pd.read_csv(path, index_col="index")
+        if verbose>0: info(short_name, f"Reduce datas {surligne_text('IN PROGRESS')}")
+        dataset_over = reduce_data_by_typing(df=dataset_over, verbose=verbose)
+        try:
+            to_drop = "Unnamed: 0"
+            if to_drop in list(dataset_over.columns):
+                if verbose>0: info(short_name, f"{to_drop} column to drop.")
+                dataset_over = dataset_over.drop(labels=[to_drop], axis=1)
+            else:
+                if verbose>1: debug(short_name, f"{to_drop} not in dataset.")
+        except:
+            pass
+        dataset_over.to_csv(save_path, index_label="index")
+        if verbose>0: info(short_name, f"{dataset_over.shape} datas keep {surligne_text('SAVE')}")
+    else:
+        dataset_over = pd.read_csv(save_path, index_col="index")
+        # TODO voir s'il faut refaire le reduce
+    if verbose>0: info(short_name, f"{dataset_over.shape} datas {surligne_text('LOAD')}")
+    return dataset_over
+
+
 from imblearn.over_sampling import RandomOverSampler
 def over_dataset_with_RandomOverSampler(X_train,y_train,data_set_path, expected_val, random_state=42, target = 'fraud_flag', verbose=0):
-    short_name = "over_RandomOverSampler"
     over_file_name = "train_complete_OVER_RandomOverSampler_"
-    res_path = data_set_path.replace("train_complete_", over_file_name)
-    dataset_over = None
-    if exists(res_path):
-        dataset_over = pd.read_csv(res_path) 
-        if verbose > 0: info(short_name, f"{res_path} {surligne_text('LOAD')}")
-    else:
-        # Choix de la taille du nouveau dataset 
-        distribution_of_samples = {0:expected_val, 1:expected_val}
-        # Sur-Echantillonnage en utilisant la méthode SMOTE
-        smote = RandomOverSampler(sampling_strategy = distribution_of_samples, random_state = random_state)
-        # X_over_sample, y_over_sample = smote.fit_resample(X,y)
-        dataset_over, y_train_over = smote.fit_resample(X_train,y_train[target])
-        if verbose > 0: info(short_name, f"{dataset_over.shape}, {y_train_over.shape}")
-        if verbose > 1: debug(short_name, f"{y_train_over.value_counts()}")
-
-        dataset_over[target] = y_train_over
-        dataset_over.to_csv(res_path)
-        if verbose > 0: info(short_name, f"{res_path} {surligne_text('SAVE')}")
-    return dataset_over
+        
+    # Choix de la taille du nouveau dataset 
+    distribution_of_samples = {0:expected_val, 1:expected_val}
+    smote = RandomOverSampler(sampling_strategy = distribution_of_samples, random_state = random_state)
+    return _over(over_model=smote, over_file_name=over_file_name, 
+                X_train=X_train,y_train=y_train,data_set_path=data_set_path, 
+                target =target, verbose=verbose)
     
 from imblearn.over_sampling import SMOTE
-
 def over_dataset_with_SMOTE(X_train,y_train,data_set_path, sampling_strategy='minority', random_state=42, target = 'fraud_flag', verbose=0):
-    short_name = "over_SMOTE"
     over_file_name = "train_complete_OVER_SMOTE_"+sampling_strategy+"_"
-    res_path = data_set_path.replace("train_complete_", over_file_name)
-    dataset_over = None
-    if exists(res_path):
-        dataset_over = pd.read_csv(res_path) 
-        if verbose > 0: info(short_name, f"{res_path} {surligne_text('LOAD')}")
-    else:
-        # Sur-Echantillonnage en utilisant la méthode SMOTE
-        smote = SMOTE(sampling_strategy=sampling_strategy, random_state=random_state, k_neighbors=5)
-        dataset_over, y_train_over = smote.fit_resample(X_train,y_train[target])
-        if verbose > 0: info(short_name, f"{dataset_over.shape}, {y_train_over.shape}")
-        if verbose > 1: debug(short_name, f"{y_train_over.value_counts()}")
-
-        dataset_over[target] = y_train_over
-        dataset_over.to_csv(res_path)
-        if verbose > 0: info(short_name, f"{res_path} {surligne_text('SAVE')}")
-    return dataset_over
+    smote = SMOTE(sampling_strategy=sampling_strategy, random_state=random_state, k_neighbors=5)
+    return _over(over_model=smote, over_file_name=over_file_name, 
+                X_train=X_train,y_train=y_train,data_set_path=data_set_path, 
+                target =target, verbose=verbose)
 
 from imblearn.over_sampling import BorderlineSMOTE
-
 def over_dataset_with_BorderlineSMOTE(X_train,y_train,data_set_path, target = 'fraud_flag', verbose=0):
-    short_name = "over_BorderlineSMOTE"
-    over_file_name = "train_complete_OVER_BorderlineSMOTE_"
+    over_file_name = "train_complete_OVER_BorderlineSMOTE_"    
+    return _over(over_model=BorderlineSMOTE(), over_file_name=over_file_name, 
+                X_train=X_train,y_train=y_train,data_set_path=data_set_path, 
+                target =target, verbose=verbose)
+
+from imblearn.over_sampling import SVMSMOTE
+def over_dataset_with_SVMSMOTE(X_train,y_train,data_set_path, target = 'fraud_flag', verbose=0):
+    over_file_name = "train_complete_OVER_SVMSMOTE_"
+    return _over(over_model=SVMSMOTE(), over_file_name=over_file_name, 
+                X_train=X_train,y_train=y_train,data_set_path=data_set_path, 
+                target =target, verbose=verbose)
+
+def _over(over_model, over_file_name, X_train,y_train,data_set_path, target = 'fraud_flag', verbose=0):
+    short_name = over_file_name.replace("train_complete_", "")
+    short_name = short_name[:-1]
     res_path = data_set_path.replace("train_complete_", over_file_name)
     dataset_over = None
     if exists(res_path):
-        dataset_over = pd.read_csv(res_path) 
-        if verbose > 0: info(short_name, f"{res_path} {surligne_text('LOAD')}")
+        dataset_over = load_over_dataset(res_path, verbose=verbose)
     else:
         # Sur-Echantillonnage en utilisant la méthode SMOTE
-        smote = BorderlineSMOTE()
-        dataset_over, y_train_over = smote.fit_resample(X_train,y_train[target])
+        dataset_over, y_train_over = over_model.fit_resample(X_train,y_train[target])
         if verbose > 0: info(short_name, f"{dataset_over.shape}, {y_train_over.shape}")
         if verbose > 1: debug(short_name, f"{y_train_over.value_counts()}")
 
         dataset_over[target] = y_train_over
-        dataset_over.to_csv(res_path)
+        dataset_over.to_csv(res_path, index_label="index")
         if verbose > 0: info(short_name, f"{res_path} {surligne_text('SAVE')}")
     return dataset_over
+
+
 # ----------------------------------------------------------------------------------
 #                        SCORE
 # ----------------------------------------------------------------------------------
@@ -800,13 +934,23 @@ def draw_pie_multiple(df, column_names, title="Répartition",index_name='cat_nam
 
 def plot_scatters(Xs, ys, titles, target="fraud_flag", size=(20, 10), verbose=0):
     labels = ['OK', 'FRAUD']
-    figure, axes = color_graph_background(ligne=len(Xs), colonne=1)
 
+    ligne=len(Xs)
+    figure, axes = color_graph_background(ligne=ligne, colonne=1)
+    size = (size[0], ligne * 5 + 3)
+
+    if ligne==1:
+        axes = [axes]
+        
     # scatter plot of examples by class label
     i = 0
     for X, y, title in zip(Xs, ys, titles):
-        for label in y[target].unique():
-            axes[i].scatter(X.loc[y[target]==label, 'amount'], X.loc[y[target]==label, 'Nb_of_items'], label=labels[label])
+        if y is None:
+            axes[i].scatter(X['amount'], X['Nb_of_items'])
+        else:
+            for label in y[target].unique():
+                axes[i].scatter(X.loc[y[target]==label, 'amount'], X.loc[y[target]==label, 'Nb_of_items'], label=labels[label])
+            axes[i].legend()
         axes[i].set_title(title)
         i += 1
     
@@ -814,16 +958,7 @@ def plot_scatters(Xs, ys, titles, target="fraud_flag", size=(20, 10), verbose=0)
     figure.set_dpi(100)
     figure.patch.set_facecolor(PLOT_FIGURE_BAGROUNG_COLOR)
     figure.suptitle(f"{target} repartition", fontsize=16)
-    
-
-def plot_scatter(X, y, target="fraud_flag", figsize=(20, 10), verbose=0):
-    labels = ['OK', 'FRAUD']
-    # scatter plot of examples by class label
-    plt.figure(figsize=figsize, dpi=100)
-    for label in y[target].unique():
-        plt.scatter(X.loc[y[target]==label, 'amount'], X.loc[y[target]==label, 'Nb_of_items'], label=labels[label])
-    plt.legend()
-    plt.show()    
+  
 
 # ----------------------------------------------------------------------------------
 #                        PRINT
